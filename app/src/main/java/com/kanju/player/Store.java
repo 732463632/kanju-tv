@@ -54,6 +54,24 @@ public final class Store {
         sp.edit().putBoolean("auto_skip_intro", v).apply();
     }
 
+    /** 预载：整集下完（最流畅，也更吃流量） */
+    public boolean prefetchAll() {
+        return sp.getBoolean("prefetch_all", false);
+    }
+
+    public void setPrefetchAll(boolean v) {
+        sp.edit().putBoolean("prefetch_all", v).apply();
+    }
+
+    /** 预载：比播放点提前下载多少兆 */
+    public int readAheadMB() {
+        return sp.getInt("read_ahead_mb", 80);
+    }
+
+    public void setReadAheadMB(int mb) {
+        sp.edit().putInt("read_ahead_mb", Math.max(8, mb)).apply();
+    }
+
     public String lastQuery() {
         return sp.getString("last_query", "");
     }

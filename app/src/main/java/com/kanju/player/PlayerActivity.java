@@ -12,8 +12,11 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
+import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
@@ -28,10 +31,11 @@ import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 播放页：全部使用原生控件。
- * 暂停 / 拖动进度 / 倍速 / 锁屏 / 选集 / 换源 / 跳过片头片尾。
+ * 暂停 / 拖动进度 / 倍速 / 锁屏 / 选集 / 换源 / 跳过片头片尾 / 预载缓冲 / 双击暂停。
  */
 public class PlayerActivity extends Activity implements PlayerView.Listener {
 
@@ -58,6 +62,13 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
     private ProgressBar spinner;
     private View loadingBox;
 
+    /** 双击暂停时中间闪一下的状态图标 */
+    private FrameLayout tapFlash;
+    private View tapIconPlay, tapIconPause;
+    private Runnable hideFlash;
+    /** 单击延迟执行，给双击让路 */
+    private final Runnable tapToggle = this::onSurfaceTap;
+
     private Models.Detail detail;
     private final List<Models.Episode> episodes = new ArrayList<>();
     private int epIndex;
@@ -66,6 +77,9 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
     private int lineIndex;
     private Models.Line currentLine;
     private boolean lineSwitching;
+    /** 当前播放走的是本机预载通道；一旦出问题要能瞬间退回直连 */
+    private boolean proxied;
+    private boolean proxyFallback;
 
     private int introEnd = -1;      // 秒
     private int outroFrom = -1;     // 距结尾秒
@@ -80,8 +94,10 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private Runnable hideTask;
     private Runnable watchdog;
+    private Runnable bufferHint = () -> {};
 
     private Store store;
+    private CacheProxy cache;
 
     // ------------------------------------------------------------ 生命周期
 
@@ -97,6 +113,11 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+
+        cache = CacheProxy.get(this);
+        cache.setReadAheadMB(store.readAheadMB());
+        cache.setFullPrefetch(store.prefetchAll());
+
         buildUi();
         enterImmersive();
         showLoading("正在解析播放线路…");
@@ -138,12 +159,20 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (cache != null) cache.setActive(true);
+    }
+
+    @Override
     protected void onPause() {
         super.onPause();
         if (pv != null) {
             pv.pause();
             savePosition();
         }
+        // 退到后台就别再预载了，省流量
+        if (cache != null) cache.setActive(false);
         updatePlayIcon();
     }
 
@@ -153,6 +182,7 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         ui.removeCallbacksAndMessages(null);
         if (pv != null) pv.release();
         savePosition();
+        if (cache != null) cache.stopPrefetch();
     }
 
     @Override
@@ -339,13 +369,21 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         root.addView(lockLayer, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        root.setOnClickListener(v -> {
-            if (locked) {
-                lockLayer.setVisibility(View.VISIBLE);
-            } else {
-                showControls(!controlsVisible);
-            }
-        });
+        // 双击暂停时的状态闪示
+        tapFlash = new FrameLayout(this);
+        tapFlash.setBackground(Ui.round(0x66000000, Ui.dp(this, 34)));
+        tapFlash.setAlpha(0f);
+        tapFlash.setVisibility(View.GONE);
+        tapIconPlay = Ui.icon(this, Ui.IC_PLAY, 30, Ui.TEXT);
+        tapIconPause = Ui.icon(this, Ui.IC_PAUSE, 30, Ui.TEXT);
+        FrameLayout.LayoutParams tapIconLp = new FrameLayout.LayoutParams(
+                Ui.dp(this, 30), Ui.dp(this, 30), Gravity.CENTER);
+        tapFlash.addView(tapIconPlay, tapIconLp);
+        tapFlash.addView(tapIconPause, tapIconLp);
+        root.addView(tapFlash, new FrameLayout.LayoutParams(
+                Ui.dp(this, 68), Ui.dp(this, 68), Gravity.CENTER));
+
+        installGestures();
 
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -478,6 +516,79 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         toast("已锁屏，防误触");
     }
 
+    // ------------------------------------------------------------ 手势
+
+    private void installGestures() {
+        final GestureDetector gd = new GestureDetector(this,
+                new GestureDetector.SimpleOnGestureListener() {
+                    @Override
+                    public boolean onDown(MotionEvent e) {
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onSingleTapUp(MotionEvent e) {
+                        // 延后一个双击超时再响应，双击时才不会先闪一下控制栏
+                        ui.removeCallbacks(tapToggle);
+                        ui.postDelayed(tapToggle, ViewConfiguration.getDoubleTapTimeout());
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onDoubleTap(MotionEvent e) {
+                        ui.removeCallbacks(tapToggle);
+                        togglePlayByGesture();
+                        return true;
+                    }
+                });
+        root.setOnTouchListener((v, ev) -> gd.onTouchEvent(ev));
+    }
+
+    /** 单击画面：显示/隐藏控制栏（锁屏时只负责叫出解锁提示） */
+    private void onSurfaceTap() {
+        if (locked) {
+            lockLayer.setVisibility(View.VISIBLE);
+        } else {
+            showControls(!controlsVisible);
+        }
+    }
+
+    /** 双击画面：暂停 / 继续播放 */
+    private void togglePlayByGesture() {
+        if (locked) {
+            lockLayer.setVisibility(View.VISIBLE);
+            return;
+        }
+        boolean playing = pv.isPlaying();
+        if (playing) {
+            pv.pause();
+            savePosition();
+        } else {
+            pv.start();
+            scheduleHide();
+        }
+        updatePlayIcon();
+        flashTap(!playing);
+        android.util.Log.i("PlayerGesture", "双击 -> " + (playing ? "暂停" : "继续"));
+    }
+
+    /** 中间闪一下当前状态，给双击一个明确的反馈 */
+    private void flashTap(final boolean playing) {
+        if (tapFlash == null) return;
+        // 控制栏本来就露着，按钮图标已经变了，不必再叠一层
+        if (controlsVisible) return;
+        tapIconPlay.setVisibility(playing ? View.GONE : View.VISIBLE);
+        tapIconPause.setVisibility(playing ? View.VISIBLE : View.GONE);
+        ui.removeCallbacks(hideFlash);
+        tapFlash.animate().cancel();
+        tapFlash.setAlpha(0f);
+        tapFlash.setVisibility(View.VISIBLE);
+        tapFlash.animate().alpha(1f).setDuration(90).start();
+        hideFlash = () -> tapFlash.animate().alpha(0f).setDuration(220)
+                .withEndAction(() -> tapFlash.setVisibility(View.GONE)).start();
+        ui.postDelayed(hideFlash, 520);
+    }
+
     // ------------------------------------------------------------ 播放流程
 
     private void startEpisode(int index, boolean resetPosition) {
@@ -529,7 +640,7 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         final Models.Line candidate = lineOrder.get(idx);
         lineIndex = idx;
         lineSwitching = true;
-        showLoading("连接 " + candidate.label + " …");
+        showLoading("正在预载 " + candidate.label + " …");
         final int gen = loadGen;
         new Thread(() -> {
             try {
@@ -537,7 +648,12 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
                 runOnUiThread(() -> {
                     if (gen != loadGen) return;
                     currentLine = resolved;
-                    pv.setSource(resolved.url, null, startMs);
+                    // 换线路/换集：先停掉上一条的预载，再起新的
+                    cache.stopPrefetch();
+                    String src = playUrl(resolved);
+                    proxied = src.startsWith("http://127.0.0.1");
+                    proxyFallback = false;
+                    pv.setSource(src, null, startMs);
                     pv.playWhenReady(true);
                     startWatchdog(idx);
                     updatePlayIcon();
@@ -551,15 +667,33 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         }).start();
     }
 
-    private void startWatchdog(final int idx) {
-        ui.removeCallbacks(watchdog);
+    /**
+     * 预载：mp4 走「单文件 + 区间预读」，m3u8 走「清单改写 + 分片预取」，
+     * 两条路都以本地地址喂给 MediaPlayer，网络抖动被缓存挡在外面。
+     */
+    private String playUrl(Models.Line line) {
+        boolean hls = isHls(line);
+        String local = hls ? cache.hlsUrl(line.url, null) : cache.localUrl(line.url, null);
+        android.util.Log.i("CacheProxy", (hls ? "HLS" : "MP4") + " 预载代理=" + (local != null)
+                + " kind=" + line.finalKind + "/" + line.urlKind);
+        return local == null ? line.url : local;
+    }
+
+    private static boolean isHls(Models.Line line) {
+        String kind = line.finalKind.isEmpty() ? line.urlKind : line.finalKind;
+        if ("m3u8".equals(kind)) return true;
+        String u = line.url == null ? "" : line.url.toLowerCase(Locale.ROOT);
+        return u.contains(".m3u8") || u.contains("format=m3u8");
+    }
+
+    private void startWatchdog(final int idx) {        ui.removeCallbacks(watchdog);
         watchdog = () -> {
             if (!pv.isPrepared()) {
                 toast("线路超时，自动换下一条");
                 playLine(idx + 1, pv.duration() > 0 ? pv.position() : 0);
             }
         };
-        ui.postDelayed(watchdog, 16000);
+        ui.postDelayed(watchdog, proxied ? 22000 : 16000);
     }
 
     private void switchLine(int idx, int startMs) {
@@ -671,6 +805,16 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
     public void onError(String message) {
         runOnUiThread(() -> {
             ui.removeCallbacks(watchdog);
+            // 预载通道自己出问题（极少见）→ 同一条线路直连重来，别急着换源
+            if (proxied && !proxyFallback && currentLine != null
+                    && !TextUtils.isEmpty(currentLine.url)) {
+                proxyFallback = true;
+                toast("预载通道异常，已切回直连");
+                pv.setSource(currentLine.url, null, pv.position());
+                pv.playWhenReady(true);
+                startWatchdog(lineIndex);
+                return;
+            }
             if (lineIndex + 1 < lineOrder.size()) {
                 playLine(lineIndex + 1, pv.position());
             } else {
@@ -682,8 +826,17 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
     @Override
     public void onBuffering(boolean buffering) {
         runOnUiThread(() -> {
-            // 只在还没出画时给提示，播放中缓冲交给进度条自然停住
-            if (!buffering && pv.isPrepared()) hideLoading();
+            if (buffering) {
+                // 已经开始出画却还在缓冲：说明网络跟不上，给个轻提示（延迟 400ms 防抖）
+                if (pv.isPrepared() && pv.isPlaying()) {
+                    ui.removeCallbacks(bufferHint);
+                    bufferHint = () -> showLoading("网络较慢，正在缓冲…");
+                    ui.postDelayed(bufferHint, 400);
+                }
+            } else {
+                ui.removeCallbacks(bufferHint);
+                if (pv.isPrepared()) hideLoading();
+            }
         });
     }
 
@@ -918,6 +1071,26 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         }
 
         sb.divider();
+        sb.section("预载缓存");
+        sb.toggle(Ui.IC_FILM, "整集预载", store.prefetchAll(), on -> {
+            store.setPrefetchAll(on);
+            cache.setFullPrefetch(on);
+            toast(on ? "已开启整集预载：最流畅，也更耗流量" : "已改为按需预载");
+        });
+        long[] pg = currentLine == null ? new long[]{0, -1} : cache.progressOf(currentLine.url);
+        sb.item(Ui.IC_INFO, "本集已预载", sizeText(pg), 0, () -> {
+            long[] p = currentLine == null ? new long[]{0, -1} : cache.progressOf(currentLine.url);
+            toast("已预载 " + sizeText(p));
+        });
+        sb.item(Ui.IC_CLOSE, "清除预载缓存", fmtSize(cache.cacheSize()), 0, () -> {
+            cache.clearAll();
+            toast("已清除预载缓存");
+        });
+        sb.note("默认提前把播放点之后的 " + store.readAheadMB()
+                + "MB 下到本机，网络抖动时由这段缓存兜底；暂停、拖动再回看也不会重新走网络。"
+                + "\n单击画面显示/隐藏控制栏，双击暂停或继续播放。");
+
+        sb.divider();
         sb.section("当前线路");
         if (currentLine != null) {
             String host = "";
@@ -940,6 +1113,7 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         loadingBox.setVisibility(View.VISIBLE);
         spinner.setVisibility(View.VISIBLE);
         tvLoading.setText(text);
+        loadingBox.setOnClickListener(null);
     }
 
     private void hideLoading() {
@@ -964,6 +1138,24 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
 
     private void toast(String s) {
         Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+    }
+
+    /** 「12 MB / 320 MB（4%）」 */
+    private static String sizeText(long[] p) {
+        long done = Math.max(0, p[0]);
+        long total = p[1];
+        if (total > 0) {
+            int pct = (int) Math.min(100, done * 100 / total);
+            return fmtSize(done) + " / " + fmtSize(total) + "（" + pct + "%）";
+        }
+        return fmtSize(done);
+    }
+
+    private static String fmtSize(long b) {
+        if (b <= 0) return "0 MB";
+        if (b < 1024 * 1024) return (b / 1024) + " KB";
+        if (b < 1024L * 1024 * 1024) return Math.max(1, b / 1024 / 1024) + " MB";
+        return String.format(Locale.ROOT, "%.2f GB", b / 1024.0 / 1024 / 1024);
     }
 
     private static String fmt(int ms) {

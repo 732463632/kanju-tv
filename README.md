@@ -2,7 +2,7 @@
 
 用 **Android 原生控件** 直连 `kanju.ai` 的公开接口实现的最小可用播放器。
 没有 WebView、没有第三方 SDK、没有广告：UI 全部是 `ListView` / `SeekBar` / `MediaPlayer` / `TextureView` 这类系统控件，
-图标用 `Canvas` 手绘，所以 release 包只有 **77 KB**。
+图标用 `Canvas` 手绘，所以 release 包只有 **92 KB**（v1.3 加上预载内核后仍在 100 KB 以内）。
 
 交互走 B 站 / 爱奇艺 / 腾讯视频的路子：**搜索结果先进竖屏详情页选集，点哪一集才进横屏播放**。
 
@@ -32,17 +32,19 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 播放 / 暂停 | 中央按钮，点画面可显隐控制栏 |
+| 播放 / 暂停 | 中央按钮；**双击画面任意处也能暂停 / 继续**，双击时中间闪一下状态图标 |
 | 进度调节 | `SeekBar` 拖动，暂停态也能拖；时间精确到秒 |
 | 倍速 | 0.5x / 0.75x / 1x / 1.25x / 1.5x / 2x / 3x，选中即生效并记住 |
 | 锁屏 | 隐藏所有控制，只留「已锁定 · 点击解锁」，防误触 |
 | 选集 | 6 列网格，当前集高亮；支持上一集 / 下一集按钮（详情页也能选） |
 | 换源 | 列出已排序线路（mp4 直链优先，其次 HLS），点一条即切 |
+| **预载缓冲（v1.3）** | 本地缓存代理：边下边播 + 提前预读，网络抖动不再直接卡画面，见下文 |
 | 跳过片头 | 取站点社区统计的中位数（本剧 90s），一键跳到片头结束 |
 | 跳过片尾 | 剩余时长进入片尾区间时出现，点一下直接进下一集 |
 | 断点续播 | 按集 token 记录播放位置（哈希做 key，避免同剧共用前缀） |
-| 自动处理 | 播完自动下一集、自动跳过片头（可关）；线路失败自动换下一条（16s 看门狗） |
+| 自动处理 | 播完自动下一集、自动跳过片头（可关）；线路失败自动换下一条（22s 看门狗） |
 | 片头片尾校正 | 「更多」里可把当前进度设为片头结束 / 片尾起点，按剧记忆 |
+| 预载设置 | 「更多」里可开「整集预载」、看本集已预载多少、一键清缓存 |
 
 ---
 
@@ -64,6 +66,10 @@
 | --- | --- |
 | ![](dist/screenshots/07-detail.png) | ![](dist/screenshots/08-play-from-detail.png) |
 
+| 预载缓存（v1.3） |
+| --- |
+| ![](dist/screenshots/09-preload.png) |
+
 ---
 
 ## 三、构建
@@ -78,8 +84,17 @@ release 用 debug 签名（`signingConfig signingConfigs.debug`），可直接�
 
 产物已复制到 `dist/`：
 
-- `KanjuNative-1.2.0-release.apk`（77 KB）
-- `KanjuNative-1.2.0-debug.apk`（93 KB，含调试信息）
+- `KanjuNative-1.3.0-release.apk`（92 KB）
+- `KanjuNative-1.3.0-debug.apk`（200 KB，含调试信息）
+
+### 版本
+
+| tag | 内容 |
+| --- | --- |
+| `v1-webview` | 最早的 WebView 壳 |
+| `v1.1.0-native` | 全原生控件重写（首页/搜索/播放） |
+| `v1.2.0-detail` | 竖屏详情页 + 选集、首页对齐 Chrome |
+| `v1.3.0-preload` | 预载缓冲（本地缓存代理）+ 双击暂停 |
 
 ---
 
@@ -138,6 +153,43 @@ POST /v1/playback/resolve-line（body={ticket}）      → 真实 mp4 / m3u8 地
 `Ui.Icon` 是一个 24x24 网格的 `Canvas` 画笔，`onDraw` 里先扣掉 padding 再按 `min(w,h)/24` 缩放——
 不扣 padding 的话 `iconButton(icon=34, pad=20)` 的播放箭头会被放大到 74dp（之前「图标过大」就是这个原因）。
 
+### 7. 预载：为什么得自己写一个本地缓存代理
+
+`MediaPlayer` 的缓冲量不可调，HLS 里那句 `buffer low, pausing...` 就是网速短暂掉到码率以下被卡住。
+一集 45 分钟、几百片 m3u8 的片子，只要有一片晚到 3 秒，画面就停 3 秒——这正是「偶尔卡顿」的来源。
+
+`CacheProxy` 在 `127.0.0.1` 上起了一个只服务本机的极简 HTTP 服务，MediaPlayer 播的是本地地址：
+
+```
+GET /hls/<key>.m3u8?u=<源清单>   → 抓清单，把分片地址改写成 /seg/<key>/<n>
+GET /seg/<key>/<n>               → 已落盘直接读文件，没落盘等预载
+GET /v/<key>                     → mp4 单文件：区间预读 + 按 Range 供给
+```
+
+几个踩过的坑都固化在实现里：
+
+- **分片序号按地址固定分配**（只增不减）：清单被重复拉取时序号不能漂移，否则播放器手里的旧序号
+  会指到别的分片，直接解码报错（`err=-1010`）
+- **顺序预取管道**：当前片之后 8 片由一条串行线程按顺序下，慢网下不会自己挤兑自己
+- **起播缓冲**：清单返回前先把前 4 片下完（最多等 9 秒），起播那一下也不会卡
+- **窗口不推翻**：请求落在缓存窗口外（例如播放器探到还没下载的位置）一律直连透传，
+  绝不 `setLength(0)` 重置——否则正在发送的那条连接会被截断成 `unexpected end of stream`
+- **兜底**：预载没起来 / 源站拒绝 → 这一片直连；整条预载通道出问题 → `onError` 里同线路改直连重来一次
+- 退到后台 `setActive(false)` 立刻停预载；缓存目录 1.2GB 上限，按最久没用的删
+
+同一台模拟器、同一集 45 分钟视频的对照（`adb logcat` 里数 `buffer low`）：
+
+| | 直连（v1.2） | 预载（v1.3） |
+| --- | --- | --- |
+| 80 秒内卡顿次数 | 4 次，每次停 5–11 秒 | 0 次（仅起播那次） |
+
+### 8. 双击暂停
+
+手势用 `GestureDetector` 挂在 `root` 的 `OnTouchListener` 上（子控件按钮照常优先响应）。
+单击与双击互斥：`onSingleTapUp` 里不立刻处理，而是 `postDelayed(..., getDoubleTapTimeout())`，
+双击时把这个任务撤掉，所以双击不会先闪一下控制栏。反馈图标只在控制栏隐藏时出现，
+否则会和中间那个播放按钮叠在一起。
+
 ---
 
 ## 五、已知限制
@@ -157,7 +209,8 @@ app/src/main/java/com/kanju/player/
   Models.java       Movie / Detail / Episode / Line / Playback
   HomeActivity.java 首页：Chrome 式搜索框 + ListView + 最近搜索 + 换源
   DetailActivity.java 竖屏详情：海报头图 + 继续观看 + 选集网格 + 简介 + 换源
-  PlayerActivity.java 播放页：控制栏 / 选集 / 换源 / 倍速 / 锁屏 / 跳片头片尾
+  PlayerActivity.java 播放页：控制栏 / 选集 / 换源 / 倍速 / 锁屏 / 跳片头片尾 / 双击暂停
+  CacheProxy.java   预载内核：本机 HTTP 缓存服务（mp4 区间预读 + HLS 清单改写与分片预取）
   PlayerView.java   TextureView + MediaPlayer 封装
   Sheet.java        底部面板（叠在内容层上的浮层）
   Ui.java           色板、圆角、20 个手绘图标、开关

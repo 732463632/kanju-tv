@@ -55,6 +55,15 @@ public final class Api {
 
     private Api() {}
 
+    /** 播放预载代理请求源站时要用同一套 UA / Referer */
+    public static String userAgent() {
+        return UA;
+    }
+
+    public static String baseUrl() {
+        return activeBase;
+    }
+
     // ------------------------------------------------------------ 异常
 
     public static final class ApiException extends Exception {
