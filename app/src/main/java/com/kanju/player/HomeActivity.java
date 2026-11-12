@@ -91,7 +91,7 @@ public class HomeActivity extends Activity {
         list.setPadding(0, Ui.dp(this, 2), 0, Ui.dp(this, 18));
         adapter = new Adapter();
         list.setAdapter(adapter);
-        list.setOnItemClickListener((parent, view, pos, id) -> openPlayer(items.get(pos)));
+        list.setOnItemClickListener((parent, view, pos, id) -> openDetail(items.get(pos)));
         list.setOnScrollListener(new AbsListView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(AbsListView v, int state) {}
@@ -464,11 +464,15 @@ public class HomeActivity extends Activity {
         }).start();
     }
 
-    private void openPlayer(Models.Movie m) {
-        Intent i = new Intent(this, PlayerActivity.class);
-        i.putExtra(PlayerActivity.EXTRA_VARIANT, m.variantId);
-        i.putExtra(PlayerActivity.EXTRA_TITLE, m.title);
-        i.putExtra(PlayerActivity.EXTRA_POSTER, m.poster);
+    private void openDetail(Models.Movie m) {
+        Intent i = new Intent(this, DetailActivity.class);
+        i.putExtra(DetailActivity.EXTRA_VARIANT, m.variantId);
+        i.putExtra(DetailActivity.EXTRA_TITLE, m.title);
+        i.putExtra(DetailActivity.EXTRA_POSTER, m.poster);
+        i.putExtra(DetailActivity.EXTRA_REMARKS, !TextUtils.isEmpty(m.remarks)
+                ? m.remarks : ("series".equals(m.kind) && m.episodeCount > 0
+                ? ("全 " + m.episodeCount + " 集") : ""));
+        i.putExtra(DetailActivity.EXTRA_META, m.subtitle());
         startActivity(i);
     }
 

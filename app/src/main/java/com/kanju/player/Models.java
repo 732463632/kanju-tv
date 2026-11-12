@@ -68,6 +68,30 @@ public final class Models {
         public int outroFromEndSeconds = -1;
         public int skipSampleCount;
         public final List<String> genres = new ArrayList<>();
+        public final List<String> actors = new ArrayList<>();
+        public final List<String> directors = new ArrayList<>();
+
+        /** 「主演 井柏然 / 孙艺洲 / 王鸥 等」 */
+        public String actorsLine() {
+            if (actors.isEmpty()) return "";
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < actors.size() && i < 4; i++) {
+                if (i > 0) sb.append(" / ");
+                sb.append(actors.get(i));
+            }
+            if (actors.size() > 4) sb.append(" 等");
+            return "主演 " + sb;
+        }
+
+        public String directorLine() {
+            if (directors.isEmpty()) return "";
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < directors.size() && i < 3; i++) {
+                if (i > 0) sb.append(" / ");
+                sb.append(directors.get(i));
+            }
+            return "导演 " + sb;
+        }
     }
 
     /** 单集 */

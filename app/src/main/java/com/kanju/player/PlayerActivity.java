@@ -38,6 +38,8 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
     public static final String EXTRA_VARIANT = "variant";
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_POSTER = "poster";
+    /** 详情页指定从第几集开始（0 基） */
+    public static final String EXTRA_EPISODE = "episode_index";
 
     private String variantId = "";
     private String title = "";
@@ -91,6 +93,7 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         title = getIntent().getStringExtra(EXTRA_TITLE);
         if (title == null) title = "";
         if (variantId == null) variantId = "";
+        startIndex = getIntent().getIntExtra(EXTRA_EPISODE, -1);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
@@ -122,8 +125,11 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         }
     }
 
-    /** 优先回到上次没看完的那一集 */
+    /** 优先回到上次没看完的那一集；详情页指定了集数就用指定的 */
+    private int startIndex;
+
     private int pickStartIndex() {
+        if (startIndex >= 0 && startIndex < episodes.size()) return startIndex;
         for (int i = 0; i < episodes.size(); i++) {
             long p = store.positionOf(episodes.get(i).token);
             if (p > 5000L) return i;
@@ -158,10 +164,7 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
             showControls(true);
             return;
         }
-        if (isLandscape()) {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-            return;
-        }
+        // 转屏交给底栏的全屏按钮，返回键直接退回详情页
         savePosition();
         super.onBackPressed();
     }
@@ -193,11 +196,8 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         topBar.setBackground(gradientTop());
 
         topBar.addView(Ui.iconButton(this, Ui.IC_BACK, 22, Ui.TEXT, 9, v -> {
-            if (isLandscape()) setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-            else {
-                savePosition();
-                finish();
-            }
+            savePosition();
+            finish();
         }));
 
         LinearLayout titles = new LinearLayout(this);
@@ -493,6 +493,7 @@ public class PlayerActivity extends Activity implements PlayerView.Listener {
         tvEp.setText(ep.title + (episodes.size() > 1 ? (" · 共 " + episodes.size() + " 集") : ""));
         showLoading("正在解析线路…");
         final String token = ep.token;
+        store.setRecentToken(variantId, token);
         final int gen = ++loadGen;
         new Thread(() -> {
             try {

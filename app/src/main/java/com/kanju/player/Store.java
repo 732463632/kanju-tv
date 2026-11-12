@@ -123,6 +123,16 @@ public final class Store {
         sp.edit().putLong("pos_" + key(episodeToken), ms).apply();
     }
 
+    /** 上次在这部剧里看的是哪一集（详情页「继续观看」用） */
+    public String recentToken(String variantId) {
+        return sp.getString("recent_" + key(variantId), "");
+    }
+
+    public void setRecentToken(String variantId, String episodeToken) {
+        if (variantId == null || episodeToken == null) return;
+        sp.edit().putString("recent_" + key(variantId), episodeToken).apply();
+    }
+
     /**
      * 稳定 key：token 往往前 40 位相同（同一部剧共用前缀），
      * 直接截断会让不同集共用一条续播记录，这里改用哈希。

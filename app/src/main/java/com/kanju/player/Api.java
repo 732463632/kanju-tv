@@ -232,12 +232,12 @@ public final class Api {
                 if (c == null) continue;
                 Models.Movie m = new Models.Movie();
                 m.variantId = c.optString("selected_variant_id", c.optString("variant_id", c.optString("id")));
-                m.title = c.optString("title");
+                m.title = unescape(c.optString("title"));
                 m.year = c.optInt("year");
                 m.kind = c.optString("content_kind");
-                m.area = c.optString("area");
+                m.area = unescape(c.optString("area"));
                 m.poster = c.optString("poster_url");
-                m.remarks = c.optString("remarks");
+                m.remarks = unescape(c.optString("remarks"));
                 m.episodeCount = c.optInt("current_episode_count", c.optInt("episode_count"));
                 fillStrings(c.optJSONArray("genres"), m.genres);
                 fillStrings(c.optJSONArray("actors"), m.actors);
@@ -257,16 +257,18 @@ public final class Api {
         JSONObject o = json("GET", "/v1/catalog/" + enc(variantId) + "/detail", null);
         Models.Detail d = new Models.Detail();
         d.variantId = o.optString("variant_id", variantId);
-        d.title = o.optString("title");
-        d.description = o.optString("description");
-        d.remarks = o.optString("remarks");
+        d.title = unescape(o.optString("title"));
+        d.description = unescape(o.optString("description"));
+        d.remarks = unescape(o.optString("remarks"));
         d.poster = o.optString("poster_url");
         d.year = o.optInt("year");
-        d.area = o.optString("area");
-        d.statusText = o.optString("episode_progress_text", o.optString("remarks"));
+        d.area = unescape(o.optString("area"));
+        d.statusText = unescape(o.optString("episode_progress_text", o.optString("remarks")));
         d.totalEpisodes = o.optInt("total_episode_count", o.optInt("episode_count"));
         d.availableEpisodes = o.optInt("available_episode_count", o.optInt("current_episode_count"));
         fillStrings(o.optJSONArray("genres"), d.genres);
+        fillStrings(o.optJSONArray("actors"), d.actors);
+        fillStrings(o.optJSONArray("directors"), d.directors);
 
         JSONObject preset = o.optJSONObject("playback_skip_settings_preset");
         if (preset != null && "community_median".equals(preset.optString("source"))) {
@@ -452,8 +454,33 @@ public final class Api {
     private static void fillStrings(JSONArray arr, List<String> out) {
         if (arr == null) return;
         for (int i = 0; i < arr.length(); i++) {
-            String v = arr.optString(i, "");
+            String v = unescape(arr.optString(i, ""));
             if (!TextUtils.isEmpty(v)) out.add(v);
         }
+    }
+
+    /**
+     * 站点把标题 / 演员里的撇号转成了 HTML 实体，而且偶尔会双重转义
+     * （「O&amp;#039;039」），所以这里循环还原到稳定为止。
+     */
+    static String unescape(String s) {
+        if (s == null || s.indexOf('&') < 0) return s;
+        String out = s;
+        for (int pass = 0; pass < 3; pass++) {
+            String next = out
+                    .replace("&amp;", "&")
+                    .replace("&quot;", "\"")
+                    .replace("&apos;", "'")
+                    .replace("&nbsp;", " ")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&#039;", "'")
+                    .replace("&#039", "'")
+                    .replace("&#39;", "'")
+                    .replace("&#39", "'");
+            if (next.equals(out)) break;
+            out = next;
+        }
+        return out;
     }
 }
