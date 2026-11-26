@@ -1,7 +1,7 @@
 # Kanju · 看剧
 
+[![release](https://img.shields.io/badge/download-v1.3.0%20%C2%B7%2092%20KB-2ea44f)](https://github.com/732463632/kanju-tv/releases/latest)
 ![minSdk](https://img.shields.io/badge/minSdk-24-3ddc84)
-![size](https://img.shields.io/badge/release-92%20KB-blue)
 ![deps](https://img.shields.io/badge/dependencies-0-success)
 ![license](https://img.shields.io/badge/license-MIT-black)
 
@@ -42,16 +42,18 @@
 
 ## 下载安装
 
-从 [`dist/`](dist/) 取最新包，直接侧载（release 用 debug 签名，可安装但不能上架商店）：
+**直链下载**（点一下即存盘，无需登录）：
+
+- [KanjuNative-1.3.0-release.apk](https://github.com/732463632/kanju-tv/releases/download/v1.3.0/KanjuNative-1.3.0-release.apk) — 92 KB，日常使用
+- [KanjuNative-1.3.0-debug.apk](https://github.com/732463632/kanju-tv/releases/download/v1.3.0/KanjuNative-1.3.0-debug.apk) — 203 KB，含调试信息
+
+全部版本在 [Releases](https://github.com/732463632/kanju-tv/releases) 里；仓库内的 [`dist/`](dist/) 是同一份文件的副本。
+
+装到手机（release 用 debug 签名，可侧载，不能上架商店）：
 
 ```bash
-adb install -r dist/KanjuNative-1.3.0-release.apk
+adb install -r KanjuNative-1.3.0-release.apk
 ```
-
-| 文件 | 大小 | 说明 |
-| --- | --- | --- |
-| `KanjuNative-1.3.0-release.apk` | 92 KB | 日常使用 |
-| `KanjuNative-1.3.0-debug.apk` | 200 KB | 含调试信息 |
 
 要求 Android 7.0（API 24）及以上。
 
