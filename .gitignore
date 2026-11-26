@@ -5,5 +5,9 @@
 /local.properties
 /.idea/
 /build/shots/
-
 /tmp/
+
+# 系统 / 调试产物
+*.log
+.DS_Store
+Thumbs.db

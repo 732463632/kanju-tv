@@ -1,16 +1,63 @@
-# KanjuNative · 看剧（原生播放器）
+# Kanju · 看剧
 
-用 **Android 原生控件** 直连 `kanju.ai` 的公开接口实现的最小可用播放器。
-没有 WebView、没有第三方 SDK、没有广告：UI 全部是 `ListView` / `SeekBar` / `MediaPlayer` / `TextureView` 这类系统控件，
-图标用 `Canvas` 手绘，所以 release 包只有 **92 KB**（v1.3 加上预载内核后仍在 100 KB 以内）。
+![minSdk](https://img.shields.io/badge/minSdk-24-3ddc84)
+![size](https://img.shields.io/badge/release-92%20KB-blue)
+![deps](https://img.shields.io/badge/dependencies-0-success)
+![license](https://img.shields.io/badge/license-MIT-black)
 
-交互走 B 站 / 爱奇艺 / 腾讯视频的路子：**搜索结果先进竖屏详情页选集，点哪一集才进横屏播放**。
+一个只有 92 KB 的 Android 影视播放器。直连 `kanju.ai` 的公开接口，界面全部用 **系统原生控件** 手写：
+没有 WebView、没有第三方 SDK、没有广告，图标是 `Canvas` 一行行画出来的。
 
-> 上一个 WebView 壳版本保留在 `../KanjuLite`（tag `v1-webview`）。
+交互照 B 站 / 爱奇艺 / 腾讯视频的路子：**搜索结果先进竖屏详情页选集，点哪一集才进横屏播放**。
+
+```
+首页（Chrome 式搜索框） → 结果列表 → 竖屏详情 · 选集 → 横屏播放
+```
 
 ---
 
-## 一、功能
+## 截图
+
+| 首页 | 搜索结果 |
+| --- | --- |
+| ![](dist/screenshots/01-home.png) | ![](dist/screenshots/02-results.png) |
+
+| 竖屏详情页 · 选集 | 从详情页续播 |
+| --- | --- |
+| ![](dist/screenshots/07-detail.png) | ![](dist/screenshots/08-play-from-detail.png) |
+
+| 播放控制 | 选集面板 |
+| --- | --- |
+| ![](dist/screenshots/03-player.png) | ![](dist/screenshots/04-episodes.png) |
+
+| 倍速 | 锁屏 |
+| --- | --- |
+| ![](dist/screenshots/05-speed.png) | ![](dist/screenshots/06-lock.png) |
+
+| 预载缓存（v1.3） |
+| --- |
+| ![](dist/screenshots/09-preload.png) |
+
+---
+
+## 下载安装
+
+从 [`dist/`](dist/) 取最新包，直接侧载（release 用 debug 签名，可安装但不能上架商店）：
+
+```bash
+adb install -r dist/KanjuNative-1.3.0-release.apk
+```
+
+| 文件 | 大小 | 说明 |
+| --- | --- | --- |
+| `KanjuNative-1.3.0-release.apk` | 92 KB | 日常使用 |
+| `KanjuNative-1.3.0-debug.apk` | 200 KB | 含调试信息 |
+
+要求 Android 7.0（API 24）及以上。
+
+---
+
+## 功能
 
 **首页（对齐 Chrome 移动端新标签页）**
 
@@ -19,7 +66,7 @@
 - 换源偏好：自动优选 / 官方线路 / 4K高清 / 海外线路 / 资源站
 - 最近搜索：搜过的关键词以胶囊列出，一点即搜（本地只存 8 条）
 
-**详情页（竖屏选集，v1.2 新增）**
+**详情页（竖屏选集）**
 
 - 顶部海报做背景并向下渐隐，压着封面 + 标题 + 更新状态 + 年份/地区/类型 + 主演
 - 主按钮：没有记录时是「播放 第1集」，看过就是「继续观看 第N集 · 12:34」，点了从断点续播
@@ -38,7 +85,7 @@
 | 锁屏 | 隐藏所有控制，只留「已锁定 · 点击解锁」，防误触 |
 | 选集 | 6 列网格，当前集高亮；支持上一集 / 下一集按钮（详情页也能选） |
 | 换源 | 列出已排序线路（mp4 直链优先，其次 HLS），点一条即切 |
-| **预载缓冲（v1.3）** | 本地缓存代理：边下边播 + 提前预读，网络抖动不再直接卡画面，见下文 |
+| **预载缓冲** | 本地缓存代理：边下边播 + 提前预读，网络抖动不再直接卡画面，见下文 |
 | 跳过片头 | 取站点社区统计的中位数（本剧 90s），一键跳到片头结束 |
 | 跳过片尾 | 剩余时长进入片尾区间时出现，点一下直接进下一集 |
 | 断点续播 | 按集 token 记录播放位置（哈希做 key，避免同剧共用前缀） |
@@ -48,57 +95,35 @@
 
 ---
 
-## 二、截图
+## 构建
 
-| 首页 | 搜索结果 |
-| --- | --- |
-| ![](dist/screenshots/01-home.png) | ![](dist/screenshots/02-results.png) |
-
-| 播放控制 | 选集 |
-| --- | --- |
-| ![](dist/screenshots/03-player.png) | ![](dist/screenshots/04-episodes.png) |
-
-| 倍速 | 锁屏 |
-| --- | --- |
-| ![](dist/screenshots/05-speed.png) | ![](dist/screenshots/06-lock.png) |
-
-| 竖屏详情页（选集） | 从详情页续播 |
-| --- | --- |
-| ![](dist/screenshots/07-detail.png) | ![](dist/screenshots/08-play-from-detail.png) |
-
-| 预载缓存（v1.3） |
-| --- |
-| ![](dist/screenshots/09-preload.png) |
-
----
-
-## 三、构建
+需要 JDK 17 + Android SDK 35，无其他依赖：
 
 ```bash
-# JDK 17 + Android SDK 35
-./gradlew assembleRelease     # 产出 app/build/outputs/apk/release/app-release.apk
+./gradlew assembleRelease     # → app/build/outputs/apk/release/app-release.apk
 ./gradlew assembleDebug
 ```
 
-release 用 debug 签名（`signingConfig signingConfigs.debug`），可直接侧载，但不能上架。
-
-产物已复制到 `dist/`：
-
-- `KanjuNative-1.3.0-release.apk`（92 KB）
-- `KanjuNative-1.3.0-debug.apk`（200 KB，含调试信息）
-
-### 版本
-
-| tag | 内容 |
-| --- | --- |
-| `v1-webview` | 最早的 WebView 壳 |
-| `v1.1.0-native` | 全原生控件重写（首页/搜索/播放） |
-| `v1.2.0-detail` | 竖屏详情页 + 选集、首页对齐 Chrome |
-| `v1.3.0-preload` | 预载缓冲（本地缓存代理）+ 双击暂停 |
+```gradle
+minSdk 24 / targetSdk 35 / Java 17
+dependencies { /* 空的 */ }
+```
 
 ---
 
-## 四、实现要点
+## 版本
+
+| tag | 内容 |
+| --- | --- |
+| `v1.1.0-native` | 全原生控件重写（首页 / 搜索 / 播放） |
+| `v1.2.0-detail` | 竖屏详情页 + 选集，首页对齐 Chrome |
+| `v1.3.0-preload` | 预载缓冲（本地缓存代理）+ 双击暂停 |
+
+更早还有一个 WebView 壳版本，属于另一份工程，不在本仓库。
+
+---
+
+## 实现要点
 
 ### 1. 接口签名
 
@@ -192,29 +217,40 @@ GET /v/<key>                     → mp4 单文件：区间预读 + 按 Range �
 
 ---
 
-## 五、已知限制
+## 已知限制
 
 - 只做了手机竖屏（首页 / 详情）+ 横屏播放，没有平板布局
 - 线路可播性依赖站点，资源站那几十条经常返回 `invalid_public_playback_id`，靠自动换源兜底
-- 字幕/音轨切换、投屏、下载未实现
+- 字幕 / 音轨切换、投屏、下载未实现
 - release 未混淆（`minifyEnabled false`），方便对照日志
 
 ---
 
-## 六、目录
+## 目录
 
 ```
+build.gradle / settings.gradle / gradle.properties   工程配置（零依赖）
+app/build.gradle                                      minSdk 24 / compileSdk 35 / Java 17
 app/src/main/java/com/kanju/player/
-  Api.java          签名 + 全部 HTTP 接口 + 线路排序
-  Models.java       Movie / Detail / Episode / Line / Playback
-  HomeActivity.java 首页：Chrome 式搜索框 + ListView + 最近搜索 + 换源
+  Api.java            签名 + 全部 HTTP 接口 + 线路排序
+  Models.java         Movie / Detail / Episode / Line / Playback
+  HomeActivity.java   首页：Chrome 式搜索框 + ListView + 最近搜索 + 换源
   DetailActivity.java 竖屏详情：海报头图 + 继续观看 + 选集网格 + 简介 + 换源
   PlayerActivity.java 播放页：控制栏 / 选集 / 换源 / 倍速 / 锁屏 / 跳片头片尾 / 双击暂停
-  CacheProxy.java   预载内核：本机 HTTP 缓存服务（mp4 区间预读 + HLS 清单改写与分片预取）
-  PlayerView.java   TextureView + MediaPlayer 封装
-  Sheet.java        底部面板（叠在内容层上的浮层）
-  Ui.java           色板、圆角、20 个手绘图标、开关
-  Store.java        SharedPreferences：偏好 / 倍速 / 断点 / 最近一集 / 片头片尾
-  ImgLoader.java    海报：内存 LruCache + 磁盘缓存 + 采样
-  PosterView.java   圆角海报
+  CacheProxy.java     预载内核：本机 HTTP 缓存服务（mp4 区间预读 + HLS 清单改写与分片预取）
+  PlayerView.java     TextureView + MediaPlayer 封装
+  Sheet.java          底部面板（叠在内容层上的浮层）
+  Ui.java             色板、圆角、20 个手绘图标、开关
+  Store.java          SharedPreferences：偏好 / 倍速 / 断点 / 最近一集 / 片头片尾
+  ImgLoader.java      海报：内存 LruCache + 磁盘缓存 + 采样
+  PosterView.java     圆角海报
+dist/                 成品 APK 与截图
 ```
+
+---
+
+## 免责声明
+
+本项目仅用于个人学习 Android 原生播放器开发（`MediaPlayer`、`TextureView`、自建 HTTP 缓存代理）。
+所有影片数据与视频流均来自第三方站点，本项目不存储、不分发任何内容，也不绕过任何付费/版权机制。
+请勿用于商业用途；如相关方认为有不妥，请提 issue 联系删除。
